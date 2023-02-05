@@ -1,7 +1,4 @@
-# Statistical-Analysis
-Repos contains several statistical analysis projects in R scripting language.
-
-## Projects:
+## Projects in R:
 1. Building an Explanation Model for Divorce Rate (Causal relationships)
 
 2. Spatial Analysis: Columbus Crime
