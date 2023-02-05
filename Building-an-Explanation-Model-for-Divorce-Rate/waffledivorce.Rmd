@@ -1,0 +1,302 @@
+#Objective:
+#Simplest linear model that gives the best explanation for the response, divorce rate
+#Data: WaffleDivorce dataset gotten from the rethinking package
+#Response = Divorce
+
+#install packages
+install.packages(c("StanHeaders","rstan"),type="source")
+all.packages(c("coda","mvtnorm","devtools","dagitty"))
+library(devtools)
+devtools::install_github("rmcelreath/rethinking")
+install.packages("faraway")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("dagitty")
+install.packages("Matching")
+install.packages("rgenoud")
+
+#import libraries
+require(faraway)
+library(rethinking)
+library(ggplot2)
+library(dplyr)
+require(leaps)
+library(car)
+library(MASS)
+require(lmtest)
+require(car)
+library(pander)
+library(dagitty)
+require(Matching)
+require(mgcv)
+
+#load data
+data(WaffleDivorce)
+
+
+#Exploratory Data Analysis (EDA)
+
+#numerical summary
+#'south' is a categorical variable
+WaffleDivorce$South <- factor(WaffleDivorce$South)
+summary(WaffleDivorce$South)
+South <- factor(WaffleDivorce$South)
+#levels(South) <- c("Other", "South")
+summary(WaffleDivorce)
+
+#graphical summary
+plot(Divorce ~ Population + MedianAgeMarriage + Marriage + Marriage.SE
+ + Divorce.SE + WaffleHouses + South + Slaves1860
+ + Population1860+ PropSlaves1860, data = WaffleDivorce)
+ 
+
+
+##fit linear model
+
+#fit linear model for all predictors without Location, Loc
+lmod <- lm(Divorce ~ Population + MedianAgeMarriage + Marriage + Marriage.SE
+ + Divorce.SE + WaffleHouses + factor(South) + Slaves1860
+ + Population1860+ PropSlaves1860, data = WaffleDivorce)
+summary(lmod)
+
+#Multiple R-squared = 0.6165
+
+
+
+##model selection
+
+#fit reduced model
+rlmod <- lm(Divorce ~ MedianAgeMarriage + Marriage.SE + Divorce.SE,
+            data=WaffleDivorce)
+summary(rlmod)
+
+#Multiple R-squared = 0.5165
+
+
+#check if nonsignificant models are useful in the model or not
+anova(lmod,rlmod)
+
+#p-value=0.2132 > 0.05, rlmod is significantly better than lmod.
+
+
+#Testing-Based Procedure
+
+#backward elimination
+#At each stage we remove the predictor with the largest p-value over 0.05. #Population1860 is the first to go:
+lmod1 <- update(lmod, .~. -Population1860)
+summary(lmod1)
+lmod2 <- update(lmod1, .~. -PropSlaves1860)
+summary(lmod2)
+lmod3 <- update(lmod2, .~. -factor(South))
+summary(lmod3)
+lmod4 <- update(lmod3, .~. -Population)
+summary(lmod4)
+lmod5 <- update(lmod4, .~. -WaffleHouses)
+summary(lmod5)
+lmod6 <- update(lmod5, .~. -Marriage)
+summary(lmod6)
+
+#Multiple R-Squared = 0.5844
+
+
+
+#Criterion-based Procedure
+
+#The leaps package exhaustively searches all possible combinations of the predictors
+b <- regsubsets(Divorce~ Population + MedianAgeMarriage + Marriage + Marriage.SE
+ + Divorce.SE + WaffleHouses + factor(South) + Slaves1860
+ + Population1860 + PropSlaves1860, data=WaffleDivorce)
+rs <- summary(b)
+rs$which
+rs$which[which.max(rs$adjr),]
+AIC <- 50*log(rs$rss/50) + (2:11)*2
+plot(AIC ~ I(1:10), ylab="AIC", xlab="Number of Predictors")
+
+#AIC
+step(lmod)
+blmod <- lm(Divorce ~ MedianAgeMarriage + Marriage + Marriage.SE + 
+ Divorce.SE + Slaves1860, data = WaffleDivorce) #R-squared = 0.6
+summary(blmod)
+
+#Multiple R-squared = 0.6044
+
+
+#check if nonsignificant models are useful in the model or not
+anova(lmod,blmod)
+
+#p-value=0.9395 > 0.05, blmod is significantly better than lmod.
+#blmod has a higher Multiple R-squared than rlmod
+
+#60.44% of the variation in Divorce rate can be explained by the 5 predictors in blmod
+
+plot(blmod)
+abline(h=23.55)
+
+
+
+#3Diagnostics
+
+#Now that we have our model, check error assumptions 
+
+#(a)
+#constant variance assumption
+plot(fitted(blmod), residuals(blmod), xlab="Fitted", ylab="Residuals")
+abline(h=0)
+#We see no cause for alarm in this plot.
+
+#to examine the constant variance assumption more closely
+plot(fitted(blmod), sqrt(abs(residuals(blmod))), xlab="Fitted", ylab=expression(sqrt(hat(epsilon))))
+sumary(lm(sqrt(abs(residuals(blmod))) ~ fitted(blmod)))
+ncvTest(blmod)
+
+#p-value < 0.05. Constant variance assumption is satisfied
+
+
+#(b)
+#check for normality
+qqnorm(residuals(blmod), ylab="Residuals",main="Q-Q Normal")
+qqline(residuals(blmod))
+#Normal residuals should follow the line approximately. Here, the residuals look normal.
+hist(residuals(blmod), xlab="Residuals",main="Histogram")
+#The histogram seen does not have the expected bell shape.
+
+#confirm normality of error with normality test
+shapiro.test(residuals(blmod))
+
+#p-value=0.2788 > 0.05. There is sufficient evidence that the errors are not significantly different from a normal distribution. In other words, we can assume the normality.
+
+
+(c)
+#check correlated errors
+dwtest(blmod)
+
+#p-value=0.4216 > 0.05. There is evidence for autocorrelation, the errors are uncorrelated. 
+
+
+#Finding Unusual Observations
+#(d)
+#leverage points
+hatv <- hatvalues(blmod)
+head(hatv)
+sum(hatv)
+p <- length(coefficients(blmod))
+n <- length(fitted(blmod))
+ratio <- p/n
+plot(hatv, main="Index Plot of Hat Values")
+abline(h=c(2,3)*ratio, col="red", lty = 2)
+text(hatv, labels = names(hatv), cex = 0.7, font = 2)
+which.max(hatv)
+which.max(hatv[hatv!=max(hatv)])
+halfnorm(hatv,ylab="Leverages")
+qqnorm(rstandard(lmod))
+abline(0,1)
+
+#The graph below shows that observation 9 has the highest ratio next to observations 50 and 41
+
+
+#(e)
+#outliers
+stud <- rstudent(lmod)
+stud[which.max(abs(stud))]
+#Bonferroni critical value
+qt(.05/(50*2),43) #lvl.of.sig, n=50, DF-1=43
+outlierTest(blmod)
+
+#This output suggests that the 13th observation is most extreme.
+#but is this an influential point?
+
+
+#(f)
+#influential point
+influencePlot(blmod)
+plot(blmod,which =4)
+plot(blmod,which = 5)
+cook.distances <-data.frame(cooks.distance(blmod))
+names(cook.distances) <- "cook.distance"
+mean.cooks.distance <- mean(cook.distances$cook.distance)
+pander(data.frame(mean.cooks.distance=mean.cooks.distance), caption = "Mean Cook distance")
+influential.points <- cook.distances[cook.distances$cook.distance > 3*mean.cooks.distance,,drop=FALSE]
+pander(influential.points, caption = "Points with Cook distance greater than three times the mean Cook distance.")
+
+#9, 13, 20, 41, 50 are the influential observations.
+
+#let's examine the effect of removing the influential observations:
+WaffleDivorce_infl <- WaffleDivorce[-c(9,13,20,41,50), ]
+WaffleDivorce_infl
+
+#refit with the 5 predictors from blmod
+blmod_infl <- lm(Divorce ~ MedianAgeMarriage + Marriage + Marriage.SE + Divorce.SE + Slaves1860, data=WaffleDivorce_infl)
+sumary(blmod_infl)
+
+#R-Squared = 0.74
+#taking out all 5 influential observations, we notice an improvement in the R-Squared value (increases from 60.44% to 74%)
+#74% of the variation in Divorce rate can be explained by all 5 predictors when the influential observations are excluded
+
+
+#(g)
+avPlots(blmod_infl) #Added-Variable Plots
+
+
+
+##Transformation
+#Transforming the response, Divorce
+boxcox(blmod_infl, plotit=T)
+boxcox(blmod_infl, plotit=T, lambda=seq(-0.4,1.75,by=0.05))
+#We can see from the plot that there is no good reason to transform the response.
+
+
+#Transforming Predictors
+#Since all assumptions for a constant error as been satisfied, we may conclude that the data is linear. We do not need to transform predictors.
+
+
+
+##Problems with Predictors
+
+#check for collinearity
+#new model
+summary(blmod_infl)
+#condition number, k, measures the relative sizes of the eigenvalues
+#check eigen decomposition
+x <- model.matrix(blmod_infl) [,-1]
+e <- eigen(t(x) %*% x)
+e$val
+sqrt(e$val[1]/e$val)
+#condition numbers > 30 shows strong collinearity
+
+
+#VIFs
+#vif of first predictor variable
+summary(lm(x[,1] ~ x[,-1]))$r.squared
+1/(1-0.6535059)
+
+#vif of all predictors
+vif(blmod_infl)
+#VIFs > 10 shows strong multicollinearity
+
+
+#Does the removal of insignificant predictors from the model reduce the collinearity?
+#To investigate this, let us see the results obtained from lmod
+#full model
+summary(lmod)
+#condition number, k, measures the relative sizes of the eigenvalues
+#check eigen decomposition
+x <- model.matrix(lmod) [,-1]
+e <- eigen(t(x) %*% x)
+e$val
+sqrt(e$val[1]/e$val) #condition numbers shows strong collinearity
+vif(lmod)
+
+#We observe higher condition numbers in lmod than the blmod_infl.
+#Example: VIF for ‘Marriage.SE’ = 12.8 which is greater than the VIF in blmod_infl of 11.4.
+#This answers the question that the removal of insignificant predictors from the model reduces the collinearity
+
+
+
+#Conclusion
+
+#A suitable model for the dataset WaffleDivorce that can be used to explain the Divorce rate is blmod_inf i.e.
+#Divorce = MedianAgeMarriage + Marriage + Marriage.SE + Divorce.SE + Slaves1860
+#when the influential observations at 9,13,20,41, and 50 have been removed.
+
+#This gives 74% explained variance compared to the 61% of the full model.
+#13% improvement!
